@@ -35,6 +35,7 @@ struct Args {
     target: String,
     show_all: bool,
     solve_all: bool,
+    print_help: bool,
 }
 
 fn read_args() -> Args {
@@ -42,6 +43,7 @@ fn read_args() -> Args {
     let mut target = String::new();
     let mut show_all = false;
     let mut solve_all = false;
+    let mut print_help = false;
 
     let mut args = env::args().skip(1); // skip program name (1st arg)
     while let Some(arg) = args.next() {
@@ -52,8 +54,11 @@ fn read_args() -> Args {
             "-t" | "--target-word" => {
                 target = args.next().expect("need an argument for solve");
             }
-            "-e" | "--everything" => {
+            "-e" | "--solve-every-word" => {
                 solve_all = true;
+            }
+            "-h" | "--help" => {
+                print_help = true;
             }
             _ => {
                 if arg.starts_with('-') {
@@ -70,6 +75,7 @@ fn read_args() -> Args {
         target,
         show_all,
         solve_all,
+        print_help,
     }
 }
 
@@ -317,6 +323,10 @@ fn sorted_scored_words(scores: &HashMap<String, f32>, words: &[&String]) -> Stri
 }
 
 fn pretty_print_filters(filter_rules: &HashSet<FilterRule>) {
+    println!("{:?}", pretty_format_filters(filter_rules));
+}
+
+fn pretty_format_filters(filter_rules: &HashSet<FilterRule>) -> String {
     let mut pretty_rules = filter_rules.iter().collect::<Vec<_>>();
     // Sort: exclude rules before includes, and then alphabetize . "+" include rules sort before "-" include rules.
     pretty_rules.sort_by(|a, b| match (a, b) {
@@ -352,13 +362,17 @@ fn pretty_print_filters(filter_rules: &HashSet<FilterRule>) {
             let by_right_spot = rb.cmp(ra);
             let by_alpha = la.cmp(lb);
             let by_number = ia.cmp(ib);
-            by_right_spot.then(by_alpha).then(by_number)
+            by_alpha.then(by_right_spot).then(by_number)
         }
     });
 
+    let mut output = Vec::<String>::new();
     let mut seen = HashSet::<String>::new();
     for pr in pretty_rules.iter() {
         match pr {
+            FilterRule::Exclude { letter } => {
+                output.push(format!("{}", letter));
+            }
             FilterRule::Include {
                 letter,
                 index,
@@ -367,24 +381,36 @@ fn pretty_print_filters(filter_rules: &HashSet<FilterRule>) {
                 let letter_string = format!("{letter}");
                 let letter_right_spot = format!("{letter}{right_spot}");
                 if !seen.contains(&letter_string) {
-                    print!(" {letter}");
+                    output.push(format!(" {letter}"));
+                    seen.insert(letter_string);
                 }
                 if !seen.contains(&letter_right_spot) {
-                    print!("{}", if *right_spot { "+" } else { "-" });
+                    output.push(format!("{}", if *right_spot { "+" } else { "-" }));
+                    seen.insert(letter_right_spot);
                 }
-                print!("{}", index + 1);
-                seen.insert(letter_string);
-                seen.insert(letter_right_spot);
+                output.push(format!("{}", index + 1));
             }
-            FilterRule::Exclude { letter } => print!("{}", letter),
         };
     }
-    println!("");
+    output.join("")
+}
+
+fn print_help() -> std::io::Result<()> {
+    println!("
+-a|--show-all
+-t|--target-word <word>
+-e|--everything (show all guesses and scores)
+-h|--help
+[filters]");
+    Ok(())
 }
 
 fn main() -> std::io::Result<()> {
     // Read in arguments and solve wordle
     let args = read_args();
+    if args.print_help {
+        return print_help()
+    }
     let filename = "/usr/share/dict/american-english";
     let words = get_words(filename);
     let scores = calculate_word_scores(&words);
@@ -400,13 +426,13 @@ fn main() -> std::io::Result<()> {
         solve_for_targets(&scores, &words, &targets)
     } else {
         // If the user has entered filters, return the matching word(s) and exit:
+        pretty_print_filters(&args.filters);
         let filtered_words = filter_words(&words, &args.filters);
         if filtered_words.is_empty() {
-            format!("No matches found with {:?} ", args.filters)
+            format!("No matches found with these args")
         } else if args.show_all {
             sorted_scored_words(&scores, &filtered_words)
         } else {
-            pretty_print_filters(&args.filters);
             highest_scoring_word(&scores, &filtered_words).clone()
         }
     };
